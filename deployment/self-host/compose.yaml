@@ -2,28 +2,33 @@ name: nod-server
 
 services:
   server:
-    build:
-      context: ../..
-      dockerfile: deployment/self-host/Dockerfile
-    image: nod-server:${NOD_IMAGE_TAG:-local}
+    image: registry.gitlab.crmediaserver.com/crob04/coolify-runtime-images/nod-server@sha256:0658e64beb0303540c956747ae8405c96eb849236b82144ebdc863da3a0b2661
     restart: unless-stopped
     init: true
-    env_file: ${NOD_ENV_FILE:-.env}
     environment:
       NODE_ENV: production
       NOD_ENVIRONMENT: production
       NOD_HOST: 0.0.0.0
       PORT: ${PORT:-4310}
       NOD_DATA_ROOT: /var/lib/nod
-      NOD_PUBLIC_URL: ${NOD_PUBLIC_URL:-http://localhost:${PORT:-4310}}
-      NOD_AUTH_TOKEN: ${NOD_AUTH_TOKEN:?Run sh setup.sh first}
-      NOD_VAULT_KEY: ${NOD_VAULT_KEY:?Run sh setup.sh first}
-      DATABASE_URL: ${DATABASE_URL:-postgresql://nod:${NOD_POSTGRES_PASSWORD:?Run sh setup.sh first}@postgres:5432/nod}
+      NOD_PUBLIC_URL: ${NOD_PUBLIC_URL:?Set NOD_PUBLIC_URL in Coolify}
+      NOD_ANALYTICS_ENABLED: ${NOD_ANALYTICS_ENABLED:-false}
+      NOD_AUTH_TOKEN: ${NOD_AUTH_TOKEN:?Set NOD_AUTH_TOKEN in Coolify}
+      NOD_VAULT_KEY: ${NOD_VAULT_KEY:?Set NOD_VAULT_KEY in Coolify}
+      DATABASE_URL: postgresql://nod:${NOD_POSTGRES_PASSWORD:?Set NOD_POSTGRES_PASSWORD in Coolify}@postgres:5432/nod
       DOCKER_HOST: tcp://runtime:2375
-      WORKSPACE_CONTAINER: nod-workspace-${COMPOSE_PROJECT_NAME:-nod-server}
-      BROWSER_CONTAINER: nod-browser-${COMPOSE_PROJECT_NAME:-nod-server}
-    ports:
-      - '${NOD_BIND_ADDRESS:-127.0.0.1}:${PORT:-4310}:${PORT:-4310}'
+      WORKSPACE_CONTAINER: nod-workspace-nod-server
+      BROWSER_CONTAINER: nod-browser-nod-server
+    expose: ['4310']
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=coolify-proxy
+      - traefik.http.routers.nod.rule=Host(`nod.crmediaserver.com`)
+      - traefik.http.routers.nod.entrypoints=http
+      - traefik.http.routers.nod.service=nod
+      - traefik.http.services.nod.loadbalancer.server.port=4310
+      - traefik.http.services.nod.loadbalancer.passhostheader=true
+      - traefik.http.services.nod.loadbalancer.responseforwarding.flushinterval=-1
     volumes:
       - server-data:/var/lib/nod
       - workspace-data:/var/lib/nod/workspaces
@@ -34,7 +39,7 @@ services:
     security_opt: [no-new-privileges:true]
     pids_limit: 512
     mem_limit: ${NOD_SERVER_MEMORY:-2g}
-    networks: [backend, control, outbound]
+    networks: [backend, control, outbound, proxy]
     depends_on:
       postgres:
         condition: service_healthy
@@ -56,7 +61,7 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: nod
-      POSTGRES_PASSWORD: ${NOD_POSTGRES_PASSWORD:?Run sh setup.sh first}
+      POSTGRES_PASSWORD: ${NOD_POSTGRES_PASSWORD:?Set NOD_POSTGRES_PASSWORD in Coolify}
       POSTGRES_DB: nod
     volumes:
       - postgres-data:/var/lib/postgresql/data
@@ -68,16 +73,15 @@ services:
       retries: 30
 
   runtime:
-    image: node:24.21.0-bookworm-slim@sha256:d6aa754f16b3197301076f047b5def2f02ea1dbbc2ca920407d46d7ec7f87b20
+    image: registry.gitlab.crmediaserver.com/crob04/coolify-runtime-images/nod-runtime@sha256:df225c3350081c00c8626a0d7a2e500b8dba9329db07a11b51f90eb8cd9eda66
     restart: unless-stopped
     init: true
     command: ['node', '/app/docker-proxy.mjs']
     environment:
-      WORKSPACE_CONTAINER: nod-workspace-${COMPOSE_PROJECT_NAME:-nod-server}
-      BROWSER_CONTAINER: nod-browser-${COMPOSE_PROJECT_NAME:-nod-server}
+      WORKSPACE_CONTAINER: nod-workspace-nod-server
+      BROWSER_CONTAINER: nod-browser-nod-server
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - ./docker-proxy.mjs:/app/docker-proxy.mjs:ro
     networks: [control]
     read_only: true
     cap_drop: [ALL]
@@ -86,11 +90,8 @@ services:
     mem_limit: 128m
 
   browser:
-    build:
-      context: ../..
-      dockerfile: Dockerfile.browser
-    image: nod-browser:${NOD_IMAGE_TAG:-local}
-    container_name: nod-browser-${COMPOSE_PROJECT_NAME:-nod-server}
+    image: registry.gitlab.crmediaserver.com/crob04/coolify-runtime-images/nod-browser@sha256:f1aec8dca249c0f02f49f26ac4e1ecdf24ad383e6917d61626f9998d400aadd1
+    container_name: nod-browser-nod-server
     hostname: nod-browser
     restart: unless-stopped
     init: true
@@ -119,11 +120,8 @@ services:
       retries: 30
 
   workspace:
-    build:
-      context: ../..
-      dockerfile: Dockerfile.workspace
-    image: nod-workspace:${NOD_IMAGE_TAG:-local}
-    container_name: nod-workspace-${COMPOSE_PROJECT_NAME:-nod-server}
+    image: registry.gitlab.crmediaserver.com/crob04/coolify-runtime-images/nod-workspace@sha256:aa71836010d2ff93d1057bae319f46bb5d301a1dc8ed3ad1a78bfb4b55f4e5da
+    container_name: nod-workspace-nod-server
     restart: unless-stopped
     init: true
     cap_drop: [ALL]
@@ -141,8 +139,7 @@ services:
     command: ['sleep', 'infinity']
 
   workspace-network:
-    image: nod-workspace:${NOD_IMAGE_TAG:-local}
-    pull_policy: never
+    image: registry.gitlab.crmediaserver.com/crob04/coolify-runtime-images/nod-workspace@sha256:aa71836010d2ff93d1057bae319f46bb5d301a1dc8ed3ad1a78bfb4b55f4e5da
     dns: [1.1.1.1, 8.8.8.8]
     user: root
     restart: unless-stopped
@@ -163,45 +160,6 @@ services:
       timeout: 3s
       retries: 10
 
-  https:
-    image: caddy:2.11.7-alpine@sha256:eb4d35b7452d1ab6171fbdbe8d9275b2301dad6dad92115d91e19fb9b24d510f
-    profiles: [https]
-    restart: unless-stopped
-    entrypoint: /bin/sh
-    command:
-      - -ec
-      - |
-        origin=$${NOD_PUBLIC_URL%/}
-        case "$$origin" in
-          https://*) authority=$${origin#https://}; authority=$${authority%:443} ;;
-          *) echo 'The HTTPS profile requires an https:// origin on port 443.' >&2; exit 1 ;;
-        esac
-        case "$$authority" in
-          ''|*[!a-zA-Z0-9.-]*) echo 'The HTTPS profile requires a DNS or IPv4 host on port 443. Use an existing proxy for other ports or IPv6.' >&2; exit 1 ;;
-        esac
-        export NOD_PUBLIC_URL="$$origin"
-        exec caddy run --config /etc/caddy/Caddyfile --adapter caddyfile
-    environment:
-      NOD_PUBLIC_URL: ${NOD_PUBLIC_URL:-http://localhost:${PORT:-4310}}
-      PORT: ${PORT:-4310}
-    ports:
-      - '80:80'
-      - '443:443'
-      - '443:443/udp'
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - https-data:/data
-      - https-config:/config
-    networks: [outbound]
-    depends_on:
-      server:
-        condition: service_healthy
-    healthcheck:
-      test: ['CMD', 'wget', '-q', '-O', '/dev/null', 'http://127.0.0.1:2019/config/']
-      interval: 5s
-      timeout: 3s
-      retries: 6
-
 networks:
   backend:
     internal: true
@@ -210,12 +168,18 @@ networks:
   outbound:
   browser:
   workspace:
+  proxy:
+    external: true
+    name: coolify-proxy
 
 volumes:
   server-data:
+    name: nod-server_server-data
   postgres-data:
+    name: nod-server_postgres-data
   workspace-data:
+    name: nod-server_workspace-data
   workspace-tools:
+    name: nod-server_workspace-tools
   browser-data:
-  https-data:
-  https-config:
+    name: nod-server_browser-data
