@@ -88,6 +88,20 @@ services:
     security_opt: [no-new-privileges:true]
     pids_limit: 64
     mem_limit: 128m
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - >-
+          fetch("http://127.0.0.1:2375/containers/" + process.env.WORKSPACE_CONTAINER + "/json",
+          {signal: AbortSignal.timeout(2000)}).then(async response => {
+          if (!response.ok || !(await response.json()).State?.Running) process.exitCode = 1;
+          }).catch(() => { process.exitCode = 1; })
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 30s
 
   browser:
     image: registry.gitlab.crmediaserver.com/crob04/coolify-runtime-images/nod-browser@sha256:f1aec8dca249c0f02f49f26ac4e1ecdf24ad383e6917d61626f9998d400aadd1
@@ -137,6 +151,11 @@ services:
         condition: service_healthy
         restart: true
     command: ['sleep', 'infinity']
+    healthcheck:
+      test: ['CMD-SHELL', 'test -w /workspace && test -w /home/node && test -x /usr/bin/python3']
+      interval: 30s
+      timeout: 3s
+      retries: 3
 
   workspace-network:
     image: registry.gitlab.crmediaserver.com/crob04/coolify-runtime-images/nod-workspace@sha256:aa71836010d2ff93d1057bae319f46bb5d301a1dc8ed3ad1a78bfb4b55f4e5da
